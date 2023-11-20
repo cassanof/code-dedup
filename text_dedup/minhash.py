@@ -197,7 +197,6 @@ if __name__ == "__main__":  # pragma: no cover
                     revision=args.revision,
                     cache_dir=args.cache_dir,
                     num_proc=args.num_proc,
-                    token=args.use_auth_token,
                 )
 
         LEN_DATASET = len(ds)
