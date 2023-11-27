@@ -35,6 +35,8 @@ def add_io_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:  # 
     )
     (parser.add_argument("--local", action=argparse.BooleanOptionalAction, help="Use local dataset", default=False),)
     (parser.add_argument("--output", type=str, help="Path to deduplicated dataset output", required=True),)
+    parser.add_argument("--push", action="store_true", help="Whether to push to HF Hub, from --output")
+    parser.add_argument("--public", action="store_true", help="Whether to make pushed dataset public, if --push")
     parser.add_argument(
         "--debug", action=argparse.BooleanOptionalAction, help="Whether to run in debug mode", default=False
     )

@@ -105,33 +105,26 @@ def embed_func(
         bytes(" ".join(t).lower(), "utf-8") for t in ngrams(NON_ALPHA.split(content), ngram_size, min_length)
     }
 
-    hashvalues: np.ndarray = np.array([hash_func(token) for token in tokens], dtype=dtype).reshape(len(tokens), 1)
+    hashvalues: np.ndarray = np.array(
+        [hash_func(token) for token in tokens], dtype=dtype).reshape(len(tokens), 1)
     # Permute the hash values to produce new universal hashes
     # Element-wise multiplication with 'hashvalues' and a (non 0 random value) and then adding b
     # Then, take modulo 'MODULO_PRIME' and bitwise_and with 'MAX_HASH' to keep only the necessary bits.
     hashvalues = (hashvalues * a + b) % modulo_prime & max_hash
     # this part is where the name "min" of minhash comes from
     # this stacks all the hashes and then takes the minimum from each column
-    masks: np.ndarray = np.full(shape=num_perm, dtype=dtype, fill_value=max_hash)
+    masks: np.ndarray = np.full(
+        shape=num_perm, dtype=dtype, fill_value=max_hash)
     hashvalues = np.vstack([hashvalues, masks]).min(axis=0)
     # Originally, byteswap was done for speed. Testing show it has a negligible impact
     # keeping  for backward compatibility, even though theoretically and empirically
     # it doesnt matter if it is there or not. github.com/ekzhu/datasketch/issues/114
-    Hs: list[bytes] = [bytes(hashvalues[start:end].byteswap().data) for start, end in hashranges]
+    Hs: list[bytes] = [bytes(hashvalues[start:end].byteswap().data)
+                       for start, end in hashranges]
     return {"__signatures__": Hs, "__id__": idx}
 
 
-if __name__ == "__main__":  # pragma: no cover
-    parser = argparse.ArgumentParser(
-        prog="text_dedup.minhash",
-        description="Deduplicate text using minhash",
-        formatter_class=argparse.RawTextHelpFormatter,
-    )
-    parser = add_io_args(parser)
-    parser = add_meta_args(parser)
-    parser = add_minhash_args(parser)
-    args = parser.parse_args()
-
+def main(args):
     HASH_BITS: int = args.hash_bits
 
     # 64 bit config is backwards compatibility mode.
@@ -178,7 +171,8 @@ if __name__ == "__main__":  # pragma: no cover
         # The following assumes a "perfect hash". using 16 bit hashes might challenge this assumption
         # lower precision dtype will cause more collisions, so higher false_positives and less false negatives.
         # Both effects move the result towards more documents being considered duplicates.
-        B, R = optimal_param(args.threshold, args.num_perm, false_positive_weight=0.5, false_negative_weight=0.5)
+        B, R = optimal_param(args.threshold, args.num_perm,
+                             false_positive_weight=0.5, false_negative_weight=0.5)
 
     HASH_RANGES = [(i * R, (i + 1) * R) for i in range(B)]
     HASH_TABLES: list[dict[int, set]] = [defaultdict(set) for _ in range(B)]
@@ -207,8 +201,10 @@ if __name__ == "__main__":  # pragma: no cover
         # `new_hash = (a * x + b) mod prime mod max_hash` we need one a (!=0), b pair per new hash
         # the following produces these a, b pairs
         PERMUTATIONS: tuple[np.ndarray, np.ndarray] = (
-            RNG.randint(1, MODULO_PRIME, size=(args.num_perm,), dtype=DTYPE),  # a is a multiplier so should not be 0
-            RNG.randint(0, MODULO_PRIME, size=(args.num_perm,), dtype=DTYPE),  # b
+            # a is a multiplier so should not be 0
+            RNG.randint(1, MODULO_PRIME, size=(args.num_perm,), dtype=DTYPE),
+            RNG.randint(0, MODULO_PRIME, size=(
+                args.num_perm,), dtype=DTYPE),  # b
         )
 
         with timer("MinHashing"):
@@ -281,7 +277,13 @@ if __name__ == "__main__":  # pragma: no cover
 
         with timer("Saving"):
             final_data = final_data.remove_columns(["__cluster__"])
-            final_data.save_to_disk(args.output)
+            if args.push:
+                final_data.push_to_hub(
+                    args.output,
+                    private=not args.public,
+                )
+            else:
+                final_data.save_to_disk(args.output)
             if args.debug:
                 with open(os.path.join(args.output, "uf.pkl"), "wb") as f:
                     pickle.dump(uf, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -297,3 +299,16 @@ if __name__ == "__main__":  # pragma: no cover
 
     logger.info(f"{'Before':<{PAD}}: {len(ds)}")
     logger.info(f"{'After':<{PAD}}: {len(final_data)}")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    parser = argparse.ArgumentParser(
+        prog="text_dedup.minhash",
+        description="Deduplicate text using minhash",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser = add_io_args(parser)
+    parser = add_meta_args(parser)
+    parser = add_minhash_args(parser)
+    args = parser.parse_args()
+    main(args)
