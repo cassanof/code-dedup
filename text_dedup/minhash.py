@@ -32,6 +32,8 @@ from text_dedup.utils.hashfunc import xxh3_16hash
 from text_dedup.utils.hashfunc import xxh3_32hash
 from text_dedup.utils.timer import Timer
 
+from pathlib import Path
+
 SEED = 42
 RNG = np.random.RandomState(SEED)
 NON_ALPHA = re.compile(r"\W", re.UNICODE)
@@ -102,25 +104,27 @@ def embed_func(
     # split content on whitespace (NON_ALPHA regex), tokenize with ngrams(), and join these n-grams into a single space separated string.
     # we then convert to lower case and then bytestrings which is then hashed. Only unique hashed n-grams are left.
     tokens: set[bytes] = {
-        bytes(" ".join(t).lower(), "utf-8") for t in ngrams(NON_ALPHA.split(content), ngram_size, min_length)
+        bytes(" ".join(t).lower(), "utf-8")
+        for t in ngrams(NON_ALPHA.split(content), ngram_size, min_length)
     }
 
     hashvalues: np.ndarray = np.array(
-        [hash_func(token) for token in tokens], dtype=dtype).reshape(len(tokens), 1)
+        [hash_func(token) for token in tokens], dtype=dtype
+    ).reshape(len(tokens), 1)
     # Permute the hash values to produce new universal hashes
     # Element-wise multiplication with 'hashvalues' and a (non 0 random value) and then adding b
     # Then, take modulo 'MODULO_PRIME' and bitwise_and with 'MAX_HASH' to keep only the necessary bits.
     hashvalues = (hashvalues * a + b) % modulo_prime & max_hash
     # this part is where the name "min" of minhash comes from
     # this stacks all the hashes and then takes the minimum from each column
-    masks: np.ndarray = np.full(
-        shape=num_perm, dtype=dtype, fill_value=max_hash)
+    masks: np.ndarray = np.full(shape=num_perm, dtype=dtype, fill_value=max_hash)
     hashvalues = np.vstack([hashvalues, masks]).min(axis=0)
     # Originally, byteswap was done for speed. Testing show it has a negligible impact
     # keeping  for backward compatibility, even though theoretically and empirically
     # it doesnt matter if it is there or not. github.com/ekzhu/datasketch/issues/114
-    Hs: list[bytes] = [bytes(hashvalues[start:end].byteswap().data)
-                       for start, end in hashranges]
+    Hs: list[bytes] = [
+        bytes(hashvalues[start:end].byteswap().data) for start, end in hashranges
+    ]
     return {"__signatures__": Hs, "__id__": idx}
 
 
@@ -171,8 +175,12 @@ def main(args):
         # The following assumes a "perfect hash". using 16 bit hashes might challenge this assumption
         # lower precision dtype will cause more collisions, so higher false_positives and less false negatives.
         # Both effects move the result towards more documents being considered duplicates.
-        B, R = optimal_param(args.threshold, args.num_perm,
-                             false_positive_weight=0.5, false_negative_weight=0.5)
+        B, R = optimal_param(
+            args.threshold,
+            args.num_perm,
+            false_positive_weight=0.5,
+            false_negative_weight=0.5,
+        )
 
     HASH_RANGES = [(i * R, (i + 1) * R) for i in range(B)]
     HASH_TABLES: list[dict[int, set]] = [defaultdict(set) for _ in range(B)]
@@ -180,7 +188,10 @@ def main(args):
     with timer("Total"):
         with timer("Loading"):
             if args.local:
-                ds = load_from_disk(args.path)
+                if Path(args.path).suffix == ".jsonl":
+                    ds = load_dataset("json", data_files=args.path, split="train")
+                else:
+                    ds = load_from_disk(args.path)
             else:
                 ds = load_dataset(
                     path=args.path,
@@ -203,8 +214,7 @@ def main(args):
         PERMUTATIONS: tuple[np.ndarray, np.ndarray] = (
             # a is a multiplier so should not be 0
             RNG.randint(1, MODULO_PRIME, size=(args.num_perm,), dtype=DTYPE),
-            RNG.randint(0, MODULO_PRIME, size=(
-                args.num_perm,), dtype=DTYPE),  # b
+            RNG.randint(0, MODULO_PRIME, size=(args.num_perm,), dtype=DTYPE),  # b
         )
 
         with timer("MinHashing"):
@@ -237,9 +247,14 @@ def main(args):
                 desc="Iterating MinHashes...",  # noqa: E501
             ):
                 embedded_shard = embedded.shard(
-                    num_shards=NUM_SHARDS, index=i, contiguous=True, writer_batch_size=args.batch_size
+                    num_shards=NUM_SHARDS,
+                    index=i,
+                    contiguous=True,
+                    writer_batch_size=args.batch_size,
                 )
-                for key, Hs in zip(embedded_shard["__id__"], embedded_shard["__signatures__"]):
+                for key, Hs in zip(
+                    embedded_shard["__id__"], embedded_shard["__signatures__"]
+                ):
                     for i, H in enumerate(Hs):
                         HASH_TABLES[i][H].add(key)
 
@@ -283,7 +298,10 @@ def main(args):
                     private=not args.public,
                 )
             else:
-                final_data.save_to_disk(args.output)
+                if Path(args.output).suffix == ".jsonl":
+                    final_data.to_json(args.output, lines=True)
+                else:
+                    final_data.save_to_disk(args.output)
             if args.debug:
                 with open(os.path.join(args.output, "uf.pkl"), "wb") as f:
                     pickle.dump(uf, f, protocol=pickle.HIGHEST_PROTOCOL)
