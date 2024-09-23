@@ -189,7 +189,12 @@ def main(args):
         with timer("Loading"):
             if args.local:
                 if Path(args.path).suffix == ".jsonl":
-                    ds = load_dataset("json", data_files=args.path, split="train")
+                    ds = load_dataset(
+                        "json",
+                        data_files=args.path,
+                        split="train",
+                        cache_dir=args.cache_dir,
+                    )
                 else:
                     ds = load_from_disk(args.path)
             else:
